@@ -1,0 +1,220 @@
+version: '3.8'
+
+services:
+  nginx-gateway:
+    image: nginx:alpine
+    ports:
+      - "${NGINX_PORT:-8080}:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - penpot-frontend
+      - strapi
+      - saleor-api
+      - appsmith
+      - payment-service
+    networks:
+      - penpot-net
+
+  penpot-postgres:
+    image: postgres:15
+    container_name: penpot-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: penpot
+      POSTGRES_USER: penpot
+      POSTGRES_PASSWORD: penpot123
+    volumes:
+      - penpot-postgres:/var/lib/postgresql/data
+    networks:
+      - penpot-net
+
+  penpot-redis:
+    image: redis:7
+    container_name: penpot-redis
+    restart: unless-stopped
+    networks:
+      - penpot-net
+
+  penpot-backend:
+    image: penpotapp/backend:latest
+    container_name: penpot-backend
+    restart: unless-stopped
+    environment:
+      PENPOT_FLAGS: enable-registration
+      PENPOT_PUBLIC_URI: http://localhost:${PENPOT_PORT:-9001}
+      PENPOT_DATABASE_URI: postgresql://penpot:penpot123@penpot-postgres/penpot
+      PENPOT_REDIS_URI: redis://penpot-redis/0
+      PENPOT_SECRET_KEY: ${PENPOT_SECRET_KEY:-change_me}
+    depends_on:
+      - penpot-postgres
+      - penpot-redis
+    networks:
+      - penpot-net
+
+  penpot-frontend:
+    image: penpotapp/frontend:latest
+    container_name: penpot-frontend
+    restart: unless-stopped
+    ports:
+      - "${PENPOT_PORT:-9001}:80"
+    environment:
+      PENPOT_BACKEND_URL: http://penpot-backend:6060
+      PENPOT_PUBLIC_URI: http://localhost:${PENPOT_PORT:-9001}
+    depends_on:
+      - penpot-backend
+    networks:
+      - penpot-net
+
+  strapi-db:
+    image: postgres:15
+    container_name: strapi-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: strapi
+      POSTGRES_USER: strapi
+      POSTGRES_PASSWORD: strapi123
+    volumes:
+      - strapi-db:/var/lib/postgresql/data
+    networks:
+      - penpot-net
+
+  strapi:
+    image: strapi/strapi:latest
+    container_name: strapi
+    restart: unless-stopped
+    ports:
+      - "${STRAPI_PORT:-1337}:1337"
+    environment:
+      DATABASE_CLIENT: postgres
+      DATABASE_HOST: strapi-db
+      DATABASE_PORT: 5432
+      DATABASE_NAME: strapi
+      DATABASE_USERNAME: strapi
+      DATABASE_PASSWORD: strapi123
+      JWT_SECRET: ${STRAPI_JWT_SECRET:-change_me}
+      ADMIN_JWT_SECRET: ${STRAPI_ADMIN_JWT_SECRET:-change_me}
+      APP_KEYS: ${STRAPI_APP_KEYS:-change_me}
+    volumes:
+      - ./strapi-app:/srv/app
+    depends_on:
+      - strapi-db
+    networks:
+      - penpot-net
+
+  saleor-db:
+    image: postgres:15
+    container_name: saleor-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: saleor
+      POSTGRES_USER: saleor
+      POSTGRES_PASSWORD: saleor123
+    volumes:
+      - saleor-db:/var/lib/postgresql/data
+    networks:
+      - penpot-net
+
+  saleor-redis:
+    image: redis:7
+    container_name: saleor-redis
+    restart: unless-stopped
+    networks:
+      - penpot-net
+
+  saleor-api:
+    image: ghcr.io/saleor/saleor:latest
+    container_name: saleor-api
+    restart: unless-stopped
+    ports:
+      - "${SALEOR_API_PORT:-8000}:8000"
+    environment:
+      DATABASE_URL: postgresql://saleor:saleor123@saleor-db/saleor
+      REDIS_URL: redis://saleor-redis:6379/0
+      SECRET_KEY: ${SALEOR_SECRET_KEY:-change_me}
+      ALLOWED_HOSTS: localhost
+    depends_on:
+      - saleor-db
+      - saleor-redis
+    networks:
+      - penpot-net
+
+  saleor-dashboard:
+    image: ghcr.io/saleor/saleor-dashboard:latest
+    container_name: saleor-dashboard
+    restart: unless-stopped
+    ports:
+      - "${SALEOR_DASHBOARD_PORT:-9000}:80"
+    environment:
+      API_URL: http://saleor-api:8000/graphql/
+    depends_on:
+      - saleor-api
+    networks:
+      - penpot-net
+
+  appsmith:
+    image: appsmith/appsmith-ce:latest
+    container_name: appsmith
+    restart: unless-stopped
+    ports:
+      - "${APPSMITH_PORT:-8081}:80"
+    environment:
+      APPSMITH_ENCRYPTION_SALT: ${APPSMITH_SALT:-change_me}
+      APPSMITH_ENCRYPTION_PASSWORD: ${APPSMITH_PASSWORD:-change_me}
+      APPSMITH_SERVER_URL: http://localhost:${APPSMITH_PORT:-8081}
+    volumes:
+      - appsmith-data:/appsmith-stacks
+    networks:
+      - penpot-net
+
+  payment-service:
+    build: ./payment-service
+    container_name: payment-service
+    restart: unless-stopped
+    ports:
+      - "${PAYMENT_PORT:-8001}:8001"
+    environment:
+      - PAYFAST_MERCHANT_ID=${PAYFAST_MERCHANT_ID}
+      - PAYFAST_MERCHANT_KEY=${PAYFAST_MERCHANT_KEY}
+      - PAYFAST_PASSPHRASE=${PAYFAST_PASSPHRASE}
+      - PAYFAST_SANDBOX=${PAYFAST_SANDBOX}
+      - OZOW_SITE_CODE=${OZOW_SITE_CODE}
+      - OZOW_API_KEY=${OZOW_API_KEY}
+      - YOCO_PUBLIC_KEY=${YOCO_PUBLIC_KEY}
+      - YOCO_SECRET_KEY=${YOCO_SECRET_KEY}
+      - PAYSTACK_SECRET_KEY=${PAYSTACK_SECRET_KEY}
+      - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}
+      - STRIPE_WEBHOOK_SECRET=${STRIPE_WEBHOOK_SECRET}
+      - PAYPAL_CLIENT_ID=${PAYPAL_CLIENT_ID}
+      - PAYPAL_CLIENT_SECRET=${PAYPAL_CLIENT_SECRET}
+      - PAYPAL_MODE=${PAYPAL_MODE}
+      - BANK_ACCOUNT_NUMBER=${BANK_ACCOUNT_NUMBER}
+      - BANK_BRANCH_CODE=${BANK_BRANCH_CODE}
+      - BANK_ACCOUNT_HOLDER=${BANK_ACCOUNT_HOLDER}
+      - GROK_API_KEY=${GROK_API_KEY}
+      - GROK_BASE_URL=${GROK_BASE_URL}
+    networks:
+      - penpot-net
+
+  agent-worker:
+    build: ./agents
+    container_name: agent-worker
+    restart: unless-stopped
+    environment:
+      GROK_API_KEY: ${GROK_API_KEY}
+      GROK_BASE_URL: ${GROK_BASE_URL}
+      REDIS_URL: redis://penpot-redis:6379
+    volumes:
+      - ./agents:/app
+    networks:
+      - penpot-net
+
+networks:
+  penpot-net:
+    driver: bridge
+
+volumes:
+  penpot-postgres:
+  strapi-db:
+  saleor-db:
+  appsmith-data:
